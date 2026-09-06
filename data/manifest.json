@@ -1,0 +1,86 @@
+{
+  "schema_version": "qtmaster-data-v1",
+  "download_url": null,
+  "sample_shape": [8, 222],
+  "dtype": "float32",
+  "columns": {"stock": [0, 157], "market": [158, 220], "label": 221},
+  "label": "Ref($close, -5) / Ref($close, -1) - 1",
+  "segments": {
+    "train": ["2008-01-01", "2020-03-31"],
+    "valid": ["2020-04-01", "2020-06-30"],
+    "test": ["2020-07-01", "2022-12-31"]
+  },
+  "boundary_policy": "no_purge; preserve the existing development experiment splits",
+  "train_label_rule": "per day: finite labels; drop lowest/highest floor(n_finite*0.025); retain instrument order; retained-label zscore ddof=1",
+  "evaluation_label_rule": "per day: finite-label zscore ddof=1; no tail removal; missing labels retained",
+  "provider": {
+    "identity": "chenditc/investment_data@2024-12-07",
+    "source_archive_sha256": "5f6ec2448070d73834dcbba27a778462451359334757876815ff2795d2358b93",
+    "calendar_day_sha256": "be65cca44382e66d63697b10edb0e2c6e5cd108ba24c1ec2049100a8edab8855",
+    "purpose": "Optional Qlib backtesting; not required for training or IC metrics"
+  },
+  "datasets": {
+    "csi300": {
+      "benchmark": "SH000300",
+      "description": "CSI300 rebuilt from the frozen provider; unchanged sampler bytes",
+      "source_contract_sha256": "4ea910710ed9c6a69185886d7445df7a9d585e824f7b60e2652bd671469ce951",
+      "files": {
+        "train": {
+          "path": "csi300/train.pkl",
+          "source_filename": "csi300_dl_train.pkl",
+          "sha256": "6f89cc515e941ea5c390b41d7f927c240962f8553efefde3e5aaee29560e48db",
+          "bytes": 802335705, "samples": 856246, "dates": 2979,
+          "date_min": "2008-01-02", "date_max": "2020-03-31",
+          "data_key": "learn", "daily_count_min": 203, "daily_count_max": 300
+        },
+        "valid": {
+          "path": "csi300/valid.pkl",
+          "source_filename": "csi300_dl_valid.pkl",
+          "sha256": "ba66bd5dab47c386c593a938445a58bf7d6711e60903fd9d58f92fc8e3dcc78e",
+          "bytes": 18348355, "samples": 17700, "dates": 59,
+          "date_min": "2020-04-01", "date_max": "2020-06-30",
+          "data_key": "infer", "daily_count_min": 300, "daily_count_max": 300
+        },
+        "test": {
+          "path": "csi300/test.pkl",
+          "source_filename": "csi300_dl_test.pkl",
+          "sha256": "ce87adb65004f689f80bb99ce303e1f4987841dd751d14aad8ffb6e87c83814e",
+          "bytes": 170831613, "samples": 183300, "dates": 611,
+          "date_min": "2020-07-01", "date_max": "2022-12-30",
+          "data_key": "infer", "daily_count_min": 300, "daily_count_max": 300
+        }
+      }
+    },
+    "csi800_direct": {
+      "benchmark": "SH000906",
+      "description": "Direct CSI800 from the frozen upstream provider; known historical upstream truncation is intentionally preserved, not a corrected/reconstructed CSI800 universe",
+      "source_contract_sha256": "34762405c629aad9240d9bb244c1e6de11e8019de90c4ddbd78a5986c2b08195",
+      "files": {
+        "train": {
+          "path": "csi800_direct/train.pkl",
+          "source_filename": "csi800_author_dl_train.pkl",
+          "sha256": "55e408c747f46e679b9e5f0ed3b6fd6f9d6e908492d1a9bb14f02bb4c9424016",
+          "bytes": 1656834511, "samples": 1757732, "dates": 2979,
+          "date_min": "2008-01-02", "date_max": "2020-03-31",
+          "data_key": "learn", "daily_count_min": 176, "daily_count_max": 800
+        },
+        "valid": {
+          "path": "csi800_direct/valid.pkl",
+          "source_filename": "csi800_author_dl_valid.pkl",
+          "sha256": "2b0439725ddad7861c52386ba5a86403d8f3aac9f5aedd27b4d14c9d9e3d4d65",
+          "bytes": 48864321, "samples": 47200, "dates": 59,
+          "date_min": "2020-04-01", "date_max": "2020-06-30",
+          "data_key": "infer", "daily_count_min": 800, "daily_count_max": 800
+        },
+        "test": {
+          "path": "csi800_direct/test.pkl",
+          "source_filename": "csi800_author_dl_test.pkl",
+          "sha256": "81425876490f6eae02a7a1edc48cb8ef8943294af09bf79724d008b0dd6e2e83",
+          "bytes": 454385095, "samples": 488721, "dates": 611,
+          "date_min": "2020-07-01", "date_max": "2022-12-30",
+          "data_key": "infer", "daily_count_min": 799, "daily_count_max": 800
+        }
+      }
+    }
+  }
+}

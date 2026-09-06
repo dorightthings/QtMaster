@@ -1,0 +1,8 @@
+# Install a GPU/CPU-appropriate PyTorch wheel first (see README).
+# Reference versions used with the original short-dataset experiments.
+numpy==1.23.5
+pandas==1.5.3
+scipy==1.10.1
+PyYAML==6.0.2
+scikit-learn==1.3.2
+pyqlib==0.9.7

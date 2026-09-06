@@ -1,0 +1,14 @@
+Third-party component: TQNet
+Upstream: https://github.com/ACAT-SCUT/TQNet
+Original component: models/TQNet.py
+Vendored location: src/qtmaster/vendor/tqnet.py
+License: Apache License, Version 2.0; complete upstream license text is in
+licenses/TQNet-Apache-2.0.txt.
+
+The vendored model's executable source is unchanged from the frozen upstream
+snapshot; trailing blank lines are normalized. The QtMaster adapter constructs
+the upstream model, then disables and unregisters its temporal query and channel
+attention components at runtime. See docs/MODEL_PROVENANCE.md for provenance.
+
+This notice records third-party attribution. It does not assign an overall
+license to the original QtMaster code, data, or experimental artifacts.

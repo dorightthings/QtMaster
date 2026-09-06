@@ -1,0 +1,12 @@
+dataset: csi300
+model:
+  cycle: 7
+training:
+  learning_rate: 0.001
+  batch_size: 64
+  eval_batch_size: 64
+  max_epochs: 30
+  patience: 5
+  drop_last: true
+  lr_schedule: type3
+  num_workers: 2

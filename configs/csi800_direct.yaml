@@ -2,7 +2,7 @@ dataset: csi800_direct
 model:
   cycle: 3
 training:
-  learning_rate: 0.001
+  learning_rate: 0.0005
   batch_size: 64
   eval_batch_size: 64
   max_epochs: 30

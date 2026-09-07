@@ -8,14 +8,24 @@ import unittest
 import numpy as np
 import pandas as pd
 import torch
+import yaml
 
 from qtmaster.metrics import daily_metrics, summarize_seeds
 from qtmaster.train import (
-    TrainingConfig, evaluate, main, make_loader, official_type3_lr, synthetic_splits,
+    TrainingConfig, evaluate, main, make_loader, official_type3_lr, parse_args, synthetic_splits,
 )
 
 
 class TrainingTests(unittest.TestCase):
+    def test_current_pool_defaults_and_five_seeds(self):
+        root = Path(__file__).resolve().parents[1]
+        self.assertEqual(parse_args([]).seeds, [0, 1, 2, 3, 4])
+        for pool, lr, cycle in (("csi300", 0.001, 7), ("csi800_direct", 0.0005, 3)):
+            config = yaml.safe_load((root / "configs" / (pool + ".yaml")).read_text())
+            self.assertEqual(config["dataset"], pool)
+            self.assertEqual(config["model"]["cycle"], cycle)
+            self.assertEqual(TrainingConfig(**config["training"]), TrainingConfig(learning_rate=lr))
+
     def test_original_type3_schedule(self):
         np.testing.assert_allclose(
             [official_type3_lr(0.001, epoch) for epoch in range(1, 7)],
@@ -70,6 +80,9 @@ class TrainingTests(unittest.TestCase):
             run = json.loads((experiment / "run.json").read_text())
             self.assertEqual(run["status"], "DONE")
             self.assertEqual(run["exit_code"], 0)
+            self.assertEqual(run["config"]["model_id"], "market_conditioned_lla")
+            self.assertEqual(run["config"]["parameters"], 213_279)
+            self.assertEqual(run["config"]["optimizer_groups"], 1)
             self.assertEqual(run["argv"][1:3], ["-m", "qtmaster.train"])
             self.assertIn("--smoke-test", run["argv"])
             self.assertIn(str(root / "configs/csi300.yaml"), run["argv"])

@@ -1,12 +1,13 @@
-"""The current mainline: MarketGate -> LLA -> PureMLP -> scalar readout.
+"""Market-conditioned factor gating and factor-level lead-lag alignment.
 
-The model accepts only the 221 input features, never the label column.
-Checkpoint names and construction order preserve the original mainline.
+One model only: the last observed market state conditions the lag correction.
+Inputs contain 158 stock factors and 63 market features, never the label.
 """
 
 from dataclasses import asdict, dataclass
+import math
 from types import SimpleNamespace
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import torch
 from torch import nn
@@ -19,12 +20,12 @@ LOOKBACK = 8
 STOCK_FEATURES = 158
 MARKET_FEATURES = 63
 MODEL_INPUT_FEATURES = STOCK_FEATURES + MARKET_FEATURES
-EXPECTED_PARAMETER_COUNT = 206_017
+EXPECTED_PARAMETER_COUNT = 213_279
 
 
 @dataclass(frozen=True)
 class ModelConfig:
-    """Frozen mainline defaults; cycle is 7 for CSI300 and 3 for CSI800.
+    """Current model defaults; cycle is 7 for CSI300 and 3 for CSI800.
 
     Cycle remains a compatibility field: temporal queries and channel
     attention are disabled, so it does not participate in this forward pass.
@@ -79,27 +80,96 @@ class MarketGateLLAPureMLP(nn.Module):
                 residual_init=0.1,
             )
 
+        self.residual_scale = 0.1
+        # Preserve the training RNG and start with zero conditional correction.
+        with torch.random.fork_rng(devices=[]):
+            self.tau_head = nn.Sequential(
+                nn.Linear(MARKET_FEATURES, 32),
+                nn.GELU(),
+                nn.Linear(32, STOCK_FEATURES),
+            )
+            nn.init.zeros_(self.tau_head[-1].weight)
+            nn.init.zeros_(self.tau_head[-1].bias)
+
     def compute_gate(self, market: torch.Tensor) -> torch.Tensor:
         if market.ndim != 3 or tuple(market.shape[1:]) != (LOOKBACK, MARKET_FEATURES):
             raise ValueError("market input must have shape [B,8,63]")
         return 2.0 * torch.sigmoid(torch.matmul(market, self.market_gate_weight))
 
-    def forward(
-        self, features: torch.Tensor, cycle_index: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
-        """Return [B,1,1] scores from [B,8,221] historical features.
-
-        The optional cycle_index is retained for old training-loop compatibility;
-        the PureMLP arm does not use its values.
-        """
+    @staticmethod
+    def _check_features(features: torch.Tensor) -> None:
         if features.ndim != 3 or tuple(features.shape[1:]) != (LOOKBACK, MODEL_INPUT_FEATURES):
             raise ValueError("model input must have shape [B,8,221] (158 stock + 63 market; no label)")
+
+    def compute_tau(self, features: torch.Tensor) -> torch.Tensor:
+        """Return [B,158] relative offsets using the final observed market day."""
+        self._check_features(features)
+        condition = features[:, -1, STOCK_FEATURES:MODEL_INPUT_FEATURES]
+        correction = self.tau_head(condition)
+        return self.lla_block.max_lag * torch.tanh(
+            self.lla_block.raw_tau.unsqueeze(0) + self.residual_scale * correction
+        )
+
+    def shift_history(self, x: torch.Tensor, tau: torch.Tensor) -> torch.Tensor:
+        """Original padded FFT/crop operator, supporting [C] or [B,C] lags.
+
+        No zero-lag shortcut is used: it would change both numerical behavior
+        and gradients of the alignment operator. Inverse shifting reuses
+        this same operator and therefore retains its original crop behavior.
+        """
+        if x.ndim != 3 or tuple(x.shape[1:]) != (LOOKBACK, STOCK_FEATURES):
+            raise ValueError("LLA input must have shape [B,8,158]")
+        if tau.ndim == 1 and tuple(tau.shape) == (STOCK_FEATURES,):
+            tau_for_phase = tau.unsqueeze(0).unsqueeze(0)
+        elif tau.ndim == 2 and tuple(tau.shape) == (x.shape[0], STOCK_FEATURES):
+            tau_for_phase = tau.unsqueeze(1)
+        else:
+            raise ValueError("tau must have shape [158] or [B,158]")
+        tau_for_phase = tau_for_phase.to(device=x.device, dtype=x.dtype)
+        spectrum = torch.fft.rfft(x, n=self.lla_block.fft_len, dim=1)
+        frequency = self.lla_block.frequency_index.to(
+            device=spectrum.device, dtype=spectrum.real.dtype,
+        ).view(1, -1, 1)
+        phase = -2.0 * math.pi * frequency * tau_for_phase / self.lla_block.fft_len
+        rotation = torch.polar(torch.ones_like(phase), phase)
+        shifted = spectrum * rotation
+        return torch.fft.irfft(shifted, n=self.lla_block.fft_len, dim=1)[:, :self.lla_block.seq_len]
+
+    def align_history(
+        self, x: torch.Tensor, tau: torch.Tensor, return_aux: bool = False,
+    ) -> Any:
+        """Reuse the original fusion/residual modules with one supplied tau."""
+        aligned = self.shift_history(x, tau)
+        daily_core = self.lla_block.gen_core(aligned)
+        aligned_proposal = self.lla_block.fuse(torch.cat((aligned, daily_core), dim=-1))
+        proposal = self.shift_history(aligned_proposal, -tau)
+        gate = self.lla_block.residual_gate().to(device=x.device, dtype=x.dtype).view(1, 1, -1)
+        output = x + gate * (proposal - x)
+        if tuple(output.shape) != tuple(x.shape):
+            raise RuntimeError("LLA output violated shape contract")
+        if not return_aux:
+            return output
+        diagnostics: Dict[str, torch.Tensor] = {
+            "tau": tau,
+            "residual_gate": gate,
+            "aligned": aligned,
+            "daily_core": daily_core,
+            "proposal": proposal,
+        }
+        return output, diagnostics
+
+    def forward(
+        self, features: torch.Tensor, cycle_index: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Return the unchanged [B,1,1] stock-score interface."""
+        self._check_features(features)
         if cycle_index is None:
             cycle_index = torch.zeros(features.shape[0], dtype=torch.long, device=features.device)
         stock = features[:, :, :STOCK_FEATURES]
         market = features[:, :, STOCK_FEATURES:MODEL_INPUT_FEATURES]
         gated_stock = stock * self.compute_gate(market)
-        refined_stock = self.lla_block(gated_stock)
+        tau = self.compute_tau(features).to(device=gated_stock.device, dtype=gated_stock.dtype)
+        refined_stock = self.align_history(gated_stock, tau)
         core_output = self.core(refined_stock, cycle_index.to(dtype=torch.long))
         if tuple(core_output.shape) != (features.shape[0], 1, STOCK_FEATURES):
             raise RuntimeError("PureMLP output violated [B,1,158] shape contract")

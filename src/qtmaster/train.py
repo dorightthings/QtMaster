@@ -1,4 +1,4 @@
-"""Portable training entry point for MarketGate + LLA + PureMLP.
+"""Train the current market-conditioned LLA model from scratch.
 
 Runs seeds sequentially on the requested device. For separate GPUs, launch
 separate commands with disjoint seeds; each command creates a fresh run folder.
@@ -30,7 +30,7 @@ from torch.utils.data import DataLoader, Dataset
 import yaml
 
 from .metrics import daily_metrics, summarize_seeds
-from .model import ModelConfig, build_model
+from .model import EXPECTED_PARAMETER_COUNT, ModelConfig, build_model
 
 
 @dataclass(frozen=True)
@@ -325,7 +325,7 @@ def parse_args(argv=None):
     parser.add_argument("--data-root", type=Path, default=Path("data"))
     parser.add_argument("--output-root", type=Path, default=Path("outputs"))
     parser.add_argument("--device", default="cpu", help="cpu or e.g. cuda:0")
-    parser.add_argument("--seeds", nargs="+", type=int, default=[0])
+    parser.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2, 3, 4])
     parser.add_argument("--trust-pickle", action="store_true", help="Only enable for trusted dataset pickle files")
     parser.add_argument("--qlib-provider", type=Path, help="Optional Qlib cn_data provider for AR/IR")
     parser.add_argument("--smoke-test", action="store_true", help="Two tiny CPU epochs on synthetic data; no financial metrics")
@@ -355,7 +355,11 @@ def main(argv=None):
     if min(training.batch_size, training.eval_batch_size, training.max_epochs, training.patience) < 1 or training.num_workers < 0:
         raise ValueError("Invalid positive training sizes/worker count")
     config = {"dataset": config["dataset"], "model": asdict(model_config), "training": asdict(training),
-              "smoke_test": args.smoke_test, "architecture": "MarketGate -> LLA -> PureMLP -> linear readout",
+              "smoke_test": args.smoke_test,
+              "architecture": "MarketGate -> market-conditioned LLA -> PureMLP -> linear readout",
+              "model_id": "market_conditioned_lla", "parameters": EXPECTED_PARAMETER_COUNT,
+              "tau_formula": "3*tanh(raw_tau + 0.1*tau_head(last_observed_market63))",
+              "optimizer_groups": 1,
               "cycle_index": "unused in PureMLP; no provider calendar needed for model forward",
               "test_used_for_selection": False, "checkpoint_ties_replace": True}
     if torch.device(args.device).type == "cuda" and not torch.cuda.is_available():

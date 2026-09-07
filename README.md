@@ -1,121 +1,115 @@
 # QtMaster
 
-用于在不同机器上开展独立选股实验的主线代码。首次版本为：
+当前可独立训练的市场条件化时间校准模型，用作新机器的开发起点。
+本分支只提供这一种模型，不包含历史实验版本、对比方法、实验成绩或旧权重。
 
 ```text
-股票历史因子（158维） + 市场特征（63维）
+历史股票因子（158维）＋历史市场特征（63维）
                     ↓
-          市场条件因子重标定（MarketGate）
+             市场条件因子重标定
                     ↓
-            相对时间校准模块（LLA）
+      当天市场状态驱动的因子级时间校准
                     ↓
-             PureMLP + 线性预测头
+             PureMLP＋线性预测头
                     ↓
                  收益预测
 ```
 
-输入是过去 8 个交易日的特征，输出每只股票一个分数。总可训练参数为 **206,017**。
-这个初始版本不含 SGRC、ECA、SimAM，也不把已有实验目录或 checkpoint 打包进代码仓库。
+输入为过去8个交易日的221维特征，不含标签；输出每只股票一个分数。
+模型共有 **213,279** 个可训练参数。所有部分联合训练，使用同一个Adam参数组。
+结构和来源见 [模型说明](docs/MODEL_PROVENANCE.md)。
 
-LLA 使用训练得到的因子级有界相对偏移，并结合逐日共享表示和残差融合；
-这些偏移不是对每只股票、每天单独预测的“最佳生效时间”，也不是因果时滞结论。
-模型来源和数学实现见 [模型说明](docs/MODEL_PROVENANCE.md)，交付前实际检查见
-[验证记录](docs/VALIDATION.md)。
-
-## 1. 下载和配置环境
+## 下载当前版本
 
 ```bash
-git clone https://github.com/dorightthings/QtMaster.git
+git clone --branch exp/local --single-branch https://github.com/dorightthings/QtMaster.git
 cd QtMaster
-conda env create -f environment.yml
-conda activate qtmaster
 ```
 
-然后安装适合本机的 PyTorch。原实验使用 PyTorch 2.1.2；支持 CUDA 12.1 的 NVIDIA
-环境可使用下面的官方历史版本命令：
+请显式选择 `exp/local`；`main` 不作为此次交付入口。
+
+## 安装项目与检查
+
+目标电脑的Python、PyTorch及GPU环境另行配置。本次没有安装或验证5070 Ti环境。
+`requirements.txt` 保留项目参考依赖；不要将它当作适用于所有显卡的完整环境锁文件。
+在已配好的Python/PyTorch环境中安装本项目：
 
 ```bash
-python -m pip install torch==2.1.2 --index-url https://download.pytorch.org/whl/cu121
 python -m pip install -r requirements.txt
-python -m pip install -e .
-```
-
-仅检查 CPU 运行时，可以把上面的 PyTorch 索引换成 `https://download.pytorch.org/whl/cpu`。
-其他显卡或较新的硬件请按 [PyTorch 安装说明](https://pytorch.org/get-started/previous-versions/)
-选择兼容驱动的版本，不必强求两台机器的 CUDA 环境相同。
-`environment.yml` 只创建 Python 环境；不要跳过后面的依赖安装步骤。
-
-## 2. 先做不需要数据的检查
-
-```bash
+python -m pip install -e . --no-deps
 python -m unittest discover -s tests -v
-python -m qtmaster.train --config configs/csi300.yaml --smoke-test --device cpu --seeds 0
+python -m qtmaster.train --config configs/csi300.yaml --smoke-test --seeds 0
 ```
 
-合成数据 smoke test 仅检查训练、验证、checkpoint 与输出流程，不能作为股票实验结果。
+`--smoke-test` 只在CPU上用合成数据跑两轮，检查训练、验证、checkpoint和预测保存。
+它不使用真实数据、不执行金融回测，也不产生可用于模型评价的金融指标。
 
-## 3. 下载数据
+## 放置数据
 
-数据下载链接由仓库所有者稍后填写，见 [data/README.md](data/README.md)。
-**当前 Git 仓库不包含真实数据；在链接补齐或手动转移数据包之前，只能运行合成检查。**
+参见 [数据说明](data/README.md)。两个股票池使用同一个 `data/manifest.json` 校验文件身份。
+下载链接目前尚未填写；取得可信数据包前只能运行合成检查。
+完整的六项指标还需要匹配的Qlib行情provider。
 
-两个股票池必须使用 `data/manifest.json` 中对应的数据文件，不能把不同版本的数据混用。
-只加载自己确认可信的数据包；pickle 即使通过哈希校验也不适合接收不可信来源。
+```text
+data/
+├── manifest.json
+├── csi300/
+│   ├── train.pkl
+│   ├── valid.pkl
+│   └── test.pkl
+├── csi800_direct/
+│   ├── train.pkl
+│   ├── valid.pkl
+│   └── test.pkl
+└── qlib_provider/
+    ├── calendars/day.txt
+    ├── instruments/
+    └── features/
+```
 
-回测 AR/IR 还需要与这批数据相匹配的 Qlib 日频行情 provider。
-未提供 provider 时仍可训练并计算 IC、ICIR、RankIC、RankICIR，但 AR/IR 会标为未计算。
+运行入口只依赖当前代码、指定数据和可选provider，不要求存在其他项目、服务器路径、
+历史结果目录或任何旧checkpoint。
 
-## 4. 正式训练
+## 从头训练和回测
+
+以下命令每次都创建新的运行目录，种子顺序执行，不覆盖已有运行：
 
 ```bash
-python -m qtmaster.train --config configs/csi300.yaml \
-  --data-root data --output-root outputs --device cuda:0 \
-  --seeds 0 1 2 3 4 --trust-pickle
-
-python -m qtmaster.train --config configs/csi800_direct.yaml \
-  --data-root data --output-root outputs --device cuda:0 \
-  --seeds 0 1 2 3 4 --trust-pickle
+python -m qtmaster.train --config configs/csi300.yaml --data-root data --output-root outputs --device cuda:0 --seeds 0 1 2 3 4 --trust-pickle --qlib-provider data/qlib_provider
+python -m qtmaster.train --config configs/csi800_direct.yaml --data-root data --output-root outputs --device cuda:0 --seeds 0 1 2 3 4 --trust-pickle --qlib-provider data/qlib_provider
 ```
 
-要同时完成回测，在命令后添加 `--qlib-provider data/qlib_provider`。
-这里的 `cuda:0` 是当前进程可见的第 0 张卡。例如仅开放物理 GPU 2：
+只跑一个种子时使用 `--seeds 0`。不指定 `--seeds` 时默认0–4。
+如果暂不回测，去掉 `--qlib-provider`；此时计算IC、ICIR、RankIC和RankICIR，
+AR、IR标记为未计算，不会填写为0。
+`--trust-pickle` 仅用于自己确认来源可信的数据。
 
-```bash
-CUDA_VISIBLE_DEVICES=2 python -m qtmaster.train --config configs/csi300.yaml \
-  --data-root data --output-root outputs --device cuda:0 --seeds 0 --trust-pickle
-```
+## 当前配置
 
-同一个命令中的多个 seed 顺序执行；并行实验可以使用不同 GPU 启动独立命令。
-所有运行写入新的输出目录，不覆盖已完成的结果。代码会保存配置、环境信息、seed、
-训练记录、验证选中的 checkpoint、预测和结果汇总；这些产物默认不进入 Git。
+| 项目 | CSI300 | CSI800-Direct |
+| --- | --- | --- |
+| 初始学习率 | 0.001 | 0.0005 |
+| batch / 评估batch | 64 / 64 | 64 / 64 |
+| 最大epoch / patience | 30 / 5 | 30 / 5 |
+| 优化器 | Adam，单参数组 | Adam，单参数组 |
+| 学习率调度 | type3，epoch结束后更新 | type3，epoch结束后更新 |
+| 数据加载worker | 2 | 2 |
 
-## 固定起始训练协议
+训练丢弃不足batch的最后一批；验证和测试遍历全部样本。
+checkpoint按完整验证集有限标签的SSE/count最小值选择，相等时采用后一个。
+测试仅评估选中的checkpoint，不用于选择训练轮次。
 
-| 项目 | 设置 |
-| --- | --- |
-| 历史窗口 / 模型输入 | 8 日 / 158 股票因子 + 63 市场特征 |
-| 优化器 / 初始学习率 | Adam 单参数组 / 0.001 |
-| batch / train drop_last | 64 / true |
-| 最大 epoch / patience | 30 / 5 |
-| 学习率调度 | 原 type3；epoch 结束后更新 |
-| checkpoint | 完整验证集有限标签的 MSE 最小值；相等时采用后一个 |
-| 测试集 | 仅评估最终选中的单一 checkpoint，不用于选 epoch |
-| 训练标签 | 每日去缺失与两端各 floor(2.5%)，剩余样本 ddof=1 标准化 |
-| 验证、测试标签 | 每日 ddof=1 标准化，不截尾，保留缺失标签的预测行 |
-| 回测 | Top30 / Drop30；头部 AR/IR 是不含交易成本的超额收益指标 |
+数据保留当前 `no_purge` 划分和标签处理，不在迁移过程中重新切分或重建因子。
+回测采用Top30/Drop30；AR、IR为无成本超额收益口径，模拟器成本和换手记录另存。
+每日IC相关比率使用总体标准差；当前单次运行的种子汇总也明确记录 `std_ddof=0`。
 
-初始配置与原主线一致；可移植入口简化了服务器专用调度与缓存。
-不同机器、依赖或数据加载执行方式可能产生数值差异，不承诺逐位复现历史结果。
-跨机器实验的共同起点由代码 commit、数据 manifest 和配置共同确定。
+## 目录与后续开发
 
-## 两台机器各自开发
+- `src/qtmaster/`：当前模型、数据读取、训练、指标和回测。
+- `configs/`：两个股票池的起始设置。
+- `scripts/export_data_bundle.py`：可信源数据的校验与打包工具。
+- `tests/`：无需旧模型、旧实验目录的独立检查。
+- `outputs/`：新机器生成的训练日志、预测、checkpoint和结果，不进入Git。
 
-`main` 作为共同起点；当前服务器使用 `exp/server`，另一台机器使用 `exp/local`。
-后续各自改进只推送到自己的分支，不自动合并到 `main`。
-详细步骤见 [两台机器工作流](docs/TWO_MACHINES.md)。
-
-## 来源与权利
-
-第三方 PureMLP 核心的来源、修改说明与 Apache-2.0 文本保留在 `NOTICE`、`licenses/`
-及模型说明中。第三方许可证不自动代表仓库所有者对全部新增代码授予同一许可证。
-数据不随代码发布，使用与分享数据前应确认自己的数据访问和转授权权限。
+日常提交只包含代码、配置和说明。分支使用见 [开发方式](docs/TWO_MACHINES.md)。
+第三方来源与许可保留在 `NOTICE`、`licenses/`；数据不随Git分发。

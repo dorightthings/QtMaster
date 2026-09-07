@@ -1,7 +1,7 @@
 # QtMaster
 
 当前可独立训练的市场条件化时间校准模型，用作新机器的开发起点。
-本分支只提供这一种模型，不包含历史实验版本、对比方法、实验成绩或旧权重。
+当前只提供这一种模型，不包含历史实验版本、对比方法、实验成绩或旧权重。
 
 ```text
 历史股票因子（158维）＋历史市场特征（63维）
@@ -22,11 +22,12 @@
 ## 下载当前版本
 
 ```bash
-git clone --branch exp/local --single-branch https://github.com/dorightthings/QtMaster.git
+git clone --depth 1 https://github.com/dorightthings/QtMaster.git
 cd QtMaster
 ```
 
-请显式选择 `exp/local`；`main` 不作为此次交付入口。
+默认的 `main` 就是当前最终版，不需要选择其他分支。
+`--depth 1` 只下载当前提交，不下载旧Git历史；之后仍可正常提交和推送。
 
 ## 安装项目与检查
 
@@ -111,5 +112,5 @@ checkpoint按完整验证集有限标签的SSE/count最小值选择，相等时�
 - `tests/`：无需旧模型、旧实验目录的独立检查。
 - `outputs/`：新机器生成的训练日志、预测、checkpoint和结果，不进入Git。
 
-日常提交只包含代码、配置和说明。分支使用见 [开发方式](docs/TWO_MACHINES.md)。
+日常直接在 `main` 提交代码、配置和说明，见 [开发方式](docs/TWO_MACHINES.md)。
 第三方来源与许可保留在 `NOTICE`、`licenses/`；数据不随Git分发。
